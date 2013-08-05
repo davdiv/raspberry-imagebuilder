@@ -1,0 +1,103 @@
+#!/bin/bash
+shopt -s nullglob
+
+export http_proxy="http://localhost:8123"
+deb_release=wheezy
+deb_mirror=http://raspbian.canterburycomputers.com/raspbian/
+image="$PWD/target.img"
+imageSize="500M"
+bootSize="32M"
+device=
+deviceBoot=
+deviceRoot=
+rootfs="$PWD/target"
+bootfs="$rootfs/boot"
+packages="$PWD/config/"*
+
+function error() {
+   echo "Error $1"
+   detachImage
+   echo "Error $1"
+   exit 1
+}
+
+function step() {
+   echo "**** $1"
+}
+
+function prepareImage() {
+  step "Preparing the image..."
+  truncate -s "$imageSize" $image || error prepareImage1
+  device="$(losetup -f --show $image)" || error prepareImage2
+  fdisk $device << EOF
+n
+p
+1
+
++$bootSize
+t
+c
+n
+p
+2
+
+
+w
+EOF
+  local loopnb="$(kpartx -vas "$device" | sed -E 's/.*(loop[0-9])p.*/\1/g' | head -1)" || error prepareImage3
+  deviceBoot=/dev/mapper/${loopnb}p1
+  deviceRoot=/dev/mapper/${loopnb}p2
+  ( [ -b "$deviceBoot" ] && [ -b "$deviceRoot" ] ) || error prepareImage4
+  echo "Boot and root devices available as $deviceBoot and $deviceRoot"
+  mkfs.vfat "$deviceBoot" || error prepareImage5
+  mkfs.ext4 "$deviceRoot" || error prepareImage6
+  mkdir -p "$rootfs" || error prepareImage7
+  mount "$deviceRoot" "$rootfs" || error prepareImage8
+  mkdir -p "$bootfs" || error prepareImage9
+  mount "$deviceBoot" "$bootfs" || error prepareImage10
+}
+
+function detachImage() {
+  step "Detaching image..."
+  umount "$bootfs"
+  umount "$rootfs"
+  sync
+  kpartx -ds "$device"
+  losetup -d "$device"
+}
+
+function initImage() {
+  debootstrap --no-check-gpg --foreign --arch=armhf --variant=minbase "$deb_release" "$rootfs" "$deb_mirror" || error initImage1
+  cp /usr/bin/qemu-arm-binfmt "$rootfs/usr/bin/" || error initImage2
+  cp /usr/bin/qemu-arm "$rootfs/usr/bin/" || error initImage3
+  LANG=C chroot $rootfs /debootstrap/debootstrap --second-stage || error initImage4
+  echo "deb $deb_mirror $deb_release main contrib non-free rpi firmware" > "$rootfs/etc/apt/sources.list" || error initImage5
+}
+
+function installPackage() {
+  local PKG="$1"
+  step "Installing $PKG ..."
+  if [ -n "$(echo "$PKG/root/"*)" ] ; then
+    cp -a --target-directory="$rootfs" "$PKG/root/"* || error installPackage1
+  fi
+  if [ -x "$PKG/install" ] ; then
+    ( cd "$rootfs" && $PKG/install ) || error installPackage2
+  fi
+  if [ -x "$PKG/chroot" ] ; then
+    ( cp "$PKG/chroot" "$rootfs/curinstall" &&
+      LANG=C chroot "$rootfs" /curinstall &&
+      rm -f "$rootfs/curinstall"
+    ) || error installPackage3
+  fi
+}
+
+function processPackages() {
+  for pkg in $packages ; do
+    installPackage "$pkg"
+  done
+}
+
+prepareImage
+initImage
+processPackages
+detachImage

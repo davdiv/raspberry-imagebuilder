@@ -1,0 +1,23 @@
+#!/bin/bash
+
+function error() {
+  echo "Error $1"
+  exit 1
+}
+
+rootfs="$PWD/target"
+bootfs="$rootfs/boot"
+
+image="$PWD/target.img"
+loopnb="$(kpartx -vas "$image" | sed -E 's/.*(loop[0-9])p.*/\1/g' | head -1)" || error kpartx
+deviceBoot=/dev/mapper/${loopnb}p1
+deviceRoot=/dev/mapper/${loopnb}p2
+( [ -b "$deviceBoot" ] && [ -b "$deviceRoot" ] ) || error deviceNotFound
+echo "Boot and root devices available as $deviceBoot and $deviceRoot"
+
+mkdir -p "$rootfs" || error mkdirRootfs
+mount "$deviceRoot" "$rootfs" || error mountRootfs
+mkdir -p "$bootfs" || error mkdirBootfs
+mount "$deviceBoot" "$bootfs" || error mountBootfs
+
+echo "Success!"

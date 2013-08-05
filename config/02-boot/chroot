@@ -1,0 +1,2 @@
+apt-get -y install linux-image-rpi raspberrypi-bootloader-nokernel
+echo "kernel=$(cd /boot && echo vmlinuz-*)" >> /boot/config.txt

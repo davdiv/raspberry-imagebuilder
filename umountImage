@@ -1,0 +1,10 @@
+#!/bin/bash
+
+rootfs="$PWD/target"
+bootfs="$rootfs/boot"
+image="$PWD/target.img"
+
+umount "$bootfs"
+umount "$rootfs"
+sync
+kpartx -vds "$image"
